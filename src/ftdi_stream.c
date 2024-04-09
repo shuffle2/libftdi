@@ -42,21 +42,35 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#ifndef _WIN32
-#include <sys/time.h>
-#endif
+#include <time.h>
 #include <libusb.h>
 
 #include "ftdi.h"
 
+struct size_and_time
+{
+    uint64_t total_bytes;
+    struct timespec time;
+};
+
+struct ftdi_stream_progress
+{
+    struct size_and_time first;
+    struct size_and_time prev;
+    struct size_and_time current;
+    double total_time;
+    double total_rate;
+    double current_rate;
+};
+
 typedef struct
 {
-    FTDIStreamCallback *callback;
+    ftdi_stream_callback *callback;
     void *userdata;
     int packetsize;
     int activity;
     int result;
-    FTDIProgressInfo progress;
+    struct ftdi_stream_progress progress;
 } FTDIStreamState;
 
 /* Handle callbacks
@@ -66,7 +80,7 @@ typedef struct
  * state->result is only set when some error happens
  */
 static void LIBUSB_CALL
-ftdi_readstream_cb(struct libusb_transfer *transfer)
+ftdi_stream_read_cb(struct libusb_transfer *transfer)
 {
     FTDIStreamState *state = transfer->user_data;
     int packet_size = state->packetsize;
@@ -89,7 +103,7 @@ ftdi_readstream_cb(struct libusb_transfer *transfer)
                 packetLen = packet_size;
 
             payloadLen = packetLen - 2;
-            state->progress.current.totalBytes += payloadLen;
+            state->progress.current.total_bytes += payloadLen;
 
             res = state->callback(ptr + 2, payloadLen,
                                   NULL, state->userdata);
@@ -116,15 +130,16 @@ ftdi_readstream_cb(struct libusb_transfer *transfer)
 }
 
 /**
-   Helper function to calculate (unix) time differences
+   Helper function to calculate time differences
 
    \param a timeval
    \param b timeval
+   \return (a - b) as double
 */
 static double
-TimevalDiff(const struct timeval *a, const struct timeval *b)
+timespec_diff(const struct timespec *a, const struct timespec *b)
 {
-    return (a->tv_sec - b->tv_sec) + 1e-6 * (a->tv_usec - b->tv_usec);
+    return (a->tv_sec - b->tv_sec) + 1e-9 * (a->tv_nsec - b->tv_nsec);
 }
 
 /**
@@ -142,19 +157,18 @@ TimevalDiff(const struct timeval *a, const struct timeval *b)
     \param  ftdi pointer to ftdi_context
     \param  callback to user supplied function for one block of data
     \param  userdata
-    \param  packetsPerTransfer number of packets per transfer
-    \param  numTransfers Number of transfers per callback
+    \param  packets_per_transfer number of packets per transfer
+    \param  num_transfers Number of transfers per callback
 
 */
-
 int
-ftdi_readstream(struct ftdi_context *ftdi,
-                FTDIStreamCallback *callback, void *userdata,
-                int packetsPerTransfer, int numTransfers)
+ftdi_stream_read(struct ftdi_context *ftdi,
+                ftdi_stream_callback *callback, void *userdata,
+                int packets_per_transfer, int num_transfers)
 {
     struct libusb_transfer **transfers;
     FTDIStreamState state = { callback, userdata, ftdi->max_packet_size, 1 };
-    int bufferSize = packetsPerTransfer * ftdi->max_packet_size;
+    int bufferSize = packets_per_transfer * ftdi->max_packet_size;
     int xferIndex;
     int err = 0;
 
@@ -183,14 +197,14 @@ ftdi_readstream(struct ftdi_context *ftdi,
      * Set up all transfers
      */
 
-    transfers = calloc(numTransfers, sizeof *transfers);
+    transfers = calloc(num_transfers, sizeof *transfers);
     if (!transfers)
     {
         err = LIBUSB_ERROR_NO_MEM;
         goto cleanup;
     }
 
-    for (xferIndex = 0; xferIndex < numTransfers; xferIndex++)
+    for (xferIndex = 0; xferIndex < num_transfers; xferIndex++)
     {
         struct libusb_transfer *transfer;
 
@@ -204,7 +218,7 @@ ftdi_readstream(struct ftdi_context *ftdi,
 
         libusb_fill_bulk_transfer(transfer, ftdi->usb_dev, ftdi->out_ep,
                                   malloc(bufferSize), bufferSize,
-                                  ftdi_readstream_cb,
+                                  ftdi_stream_read_cb,
                                   &state, 0);
 
         if (!transfer->buffer)
@@ -224,7 +238,7 @@ ftdi_readstream(struct ftdi_context *ftdi,
      * fetching data for several to several ten milliseconds
      * and we skip blocks
      */
-    if (ftdi_set_bitmode(ftdi,  0xff, BITMODE_SYNCFF) < 0)
+    if (ftdi_set_bitmode(ftdi, 0xff, BITMODE_SYNCFF) < 0)
     {
         fprintf(stderr,"Can't set synchronous fifo mode: %s\n",
                 ftdi_get_error_string(ftdi));
@@ -235,15 +249,16 @@ ftdi_readstream(struct ftdi_context *ftdi,
      * Run the transfers, and periodically assess progress.
      */
 
-    gettimeofday(&state.progress.first.time, NULL);
+    timespec_get(&state.progress.first.time, TIME_UTC);
 
     do
     {
-        FTDIProgressInfo  *progress = &state.progress;
+        struct ftdi_stream_progress *progress = &state.progress;
+        // 1 second
         const double progressInterval = 1.0;
         struct timeval timeout = { ftdi->usb_read_timeout / 1000,
             (ftdi->usb_read_timeout % 1000) * 1000 };
-        struct timeval now;
+        struct timespec now;
 
         int xfer_err = libusb_handle_events_timeout(ftdi->usb_ctx, &timeout);
         if (xfer_err ==  LIBUSB_ERROR_INTERRUPTED)
@@ -259,27 +274,27 @@ ftdi_readstream(struct ftdi_context *ftdi,
             state.activity = 0;
 
         // If enough time has elapsed, update the progress
-        gettimeofday(&now, NULL);
-        if (TimevalDiff(&now, &progress->current.time) >= progressInterval)
+        timespec_get(&now, TIME_UTC);
+        if (timespec_diff(&now, &progress->current.time) >= progressInterval)
         {
             progress->current.time = now;
-            progress->totalTime = TimevalDiff(&progress->current.time,
-                                              &progress->first.time);
+            progress->total_time = timespec_diff(&progress->current.time,
+                                                 &progress->first.time);
 
-            if (progress->prev.totalBytes)
+            if (progress->prev.total_bytes)
             {
                 // We have enough information to calculate rates
 
                 double currentTime;
 
-                currentTime = TimevalDiff(&progress->current.time,
-                                          &progress->prev.time);
+                currentTime = timespec_diff(&progress->current.time,
+                                            &progress->prev.time);
 
-                progress->totalRate =
-                    progress->current.totalBytes /progress->totalTime;
-                progress->currentRate =
-                    (progress->current.totalBytes -
-                     progress->prev.totalBytes) / currentTime;
+                progress->total_rate =
+                    progress->current.total_bytes / progress->total_time;
+                progress->current_rate =
+                    (progress->current.total_bytes -
+                     progress->prev.total_bytes) / currentTime;
             }
 
             state.callback(NULL, 0, progress, state.userdata);
@@ -302,3 +317,22 @@ cleanup:
         return state.result;
 }
 
+uint64_t ftdi_stream_total_bytes(struct ftdi_stream_progress *progress)
+{
+    return progress->current.total_bytes;
+}
+
+double ftdi_stream_total_time(struct ftdi_stream_progress *progress)
+{
+    return progress->total_time;
+}
+
+double ftdi_stream_total_rate(struct ftdi_stream_progress *progress)
+{
+    return progress->total_rate;
+}
+
+double ftdi_stream_current_rate(struct ftdi_stream_progress *progress)
+{
+    return progress->current_rate;
+}

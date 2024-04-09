@@ -19,9 +19,6 @@
 #define __libftdi_h__
 
 #include <stdint.h>
-#ifndef _WIN32
-#include <sys/time.h>
-#endif
 
 /* Define _FTDI_DISABLE_DEPRECATED to disable deprecated messages. */
 #ifdef _FTDI_DISABLE_DEPRECATED
@@ -421,27 +418,10 @@ enum ftdi_cbusx_func
 #define HIGH_CURRENT_DRIVE   0x10
 #define HIGH_CURRENT_DRIVE_R 0x04
 
-/**
-    \brief Progress Info for streaming read
-*/
-struct size_and_time
-{
-    uint64_t totalBytes;
-    struct timeval time;
-};
+struct ftdi_stream_progress;
 
-typedef struct
-{
-    struct size_and_time first;
-    struct size_and_time prev;
-    struct size_and_time current;
-    double totalTime;
-    double totalRate;
-    double currentRate;
-} FTDIProgressInfo;
-
-typedef int (FTDIStreamCallback)(uint8_t *buffer, int length,
-                                 FTDIProgressInfo *progress, void *userdata);
+typedef int (ftdi_stream_callback)(uint8_t *buffer, int length,
+                                 struct ftdi_stream_progress *progress, void *userdata);
 
 /**
  * Provide libftdi version information
@@ -527,8 +507,13 @@ extern "C"
     int ftdi_write_data_set_chunksize(struct ftdi_context *ftdi, unsigned int chunksize);
     int ftdi_write_data_get_chunksize(struct ftdi_context *ftdi, unsigned int *chunksize);
 
-    int ftdi_readstream(struct ftdi_context *ftdi, FTDIStreamCallback *callback,
-                        void *userdata, int packetsPerTransfer, int numTransfers);
+    int ftdi_stream_read(struct ftdi_context *ftdi, ftdi_stream_callback *callback,
+                        void *userdata, int packets_per_transfer, int num_transfers);
+    uint64_t ftdi_stream_total_bytes(struct ftdi_stream_progress *progress);
+    double ftdi_stream_total_time(struct ftdi_stream_progress *progress);
+    double ftdi_stream_total_rate(struct ftdi_stream_progress *progress);
+    double ftdi_stream_current_rate(struct ftdi_stream_progress *progress);
+
     struct ftdi_transfer_control *ftdi_write_data_submit(struct ftdi_context *ftdi, unsigned char *buf, int size);
 
     struct ftdi_transfer_control *ftdi_read_data_submit(struct ftdi_context *ftdi, unsigned char *buf, int size);

@@ -4,6 +4,8 @@ message(STATUS "CMake version: ${CMAKE_VERSION}")
 
 # Project
 project(libftdi1 C)
+set(C_STANDARD 11)
+set(C_STANDARD_REQUIRED TRUE)
 set(MAJOR_VERSION 1)
 set(MINOR_VERSION 5)
 set(PACKAGE libftdi1)

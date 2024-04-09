@@ -69,7 +69,7 @@ static uint64_t blocks = 0;
 static uint32_t skips = 0;
 static uint32_t n_err = 0;
 static int
-readCallback(uint8_t *buffer, int length, FTDIProgressInfo *progress, void *userdata)
+readCallback(uint8_t *buffer, int length, struct ftdi_stream_progress *progress, void *userdata)
 {
    if (length)
    {
@@ -124,11 +124,11 @@ readCallback(uint8_t *buffer, int length, FTDIProgressInfo *progress, void *user
    }
    if (progress)
    {
-       fprintf(stderr, "%10.02fs total time %9.3f MiB captured %7.1f kB/s curr rate %7.1f kB/s totalrate %d dropouts\n",
-               progress->totalTime,
-               progress->current.totalBytes / (1024.0 * 1024.0),
-               progress->currentRate / 1024.0,
-               progress->totalRate / 1024.0,
+       fprintf(stderr, "%10.02fs total time %9.3f MiB captured %7.1f kB/s curr rate %7.1f kB/s total_rate %d dropouts\n",
+               ftdi_stream_total_time(progress),
+               ftdi_stream_total_bytes(progress) / (1024.0 * 1024.0),
+               ftdi_stream_current_rate(progress) / 1024.0,
+               ftdi_stream_total_rate(progress) / 1024.0,
                n_err);
    }
    return exitRequested ? 1 : 0;
@@ -214,7 +214,7 @@ int main(int argc, char **argv)
            outputFile = of;
    signal(SIGINT, sigintHandler);
    
-   err = ftdi_readstream(ftdi, readCallback, NULL, 8, 256);
+   err = ftdi_stream_read(ftdi, readCallback, NULL, 8, 256);
    if (err < 0 && !exitRequested)
        exit(1);
    
