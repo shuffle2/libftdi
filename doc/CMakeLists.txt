@@ -1,4 +1,4 @@
-find_package ( Doxygen REQUIRED )
+find_package(Doxygen REQUIRED)
 
 # Copy doxy.config.in
 configure_file(
