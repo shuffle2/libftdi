@@ -31,7 +31,7 @@ on this file might be covered by the GNU General Public License.
 
 #include <list>
 #include <string>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <ftdi.h>
 
 namespace Ftdi
@@ -144,7 +144,7 @@ protected:
 
 private:
     class Private;
-    boost::shared_ptr<Private> d;
+    std::shared_ptr<Private> d;
 };
 
 /*! \brief Device EEPROM.
@@ -167,7 +167,7 @@ public:
 
 private:
     class Private;
-    boost::shared_ptr<Private> d;
+    std::shared_ptr<Private> d;
 };
 
 /*! \brief Device list.
@@ -213,7 +213,7 @@ public:
 
 private:
     class Private;
-    boost::shared_ptr<Private> d;
+    std::shared_ptr<Private> d;
 };
 
 }

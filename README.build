@@ -14,7 +14,7 @@ earlier, it is recommended you build libusbx-1.0.14 or later).
 
 sudo apt-get install libconfuse-dev (for ftdi-eeprom) (yum install libconfuse-devel)
 sudo apt-get install swig python-dev (for python bindings) (yum install swig python-devel)
-sudo apt-get install libboost-all-dev (for C++ binding and unit test) (yum install boost-devel)
+sudo apt-get install libboost-all-dev (for unit test) (yum install boost-devel)
 
 3) Clone the git repository
 mkdir libftdi

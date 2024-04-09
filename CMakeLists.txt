@@ -51,7 +51,7 @@ find_package(LibUSB REQUIRED)
 include_directories(${LIBUSB_INCLUDE_DIR})
 
 # Find Boost
-if(FTDIPP OR BUILD_TESTS)
+if(BUILD_TESTS)
   find_package(Boost REQUIRED)
 endif()
 
