@@ -19,6 +19,33 @@ message(STATUS "Detected git snapshot version: ${SNAPSHOT_VERSION}")
 
 configure_file(ftdi_version_i.h.in "${CMAKE_CURRENT_BINARY_DIR}/ftdi_version_i.h" @ONLY)
 
+if(MSVC)
+  # Disable some overly-verbose warnings activated by -Wall
+
+  # '<name>': function not inlined
+  add_compile_options(/wd4710)
+
+  # function '<name>' selected for automatic inline expansion
+  add_compile_options(/wd4711)
+
+  # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
+  add_compile_options(/wd5045)
+
+  # '<type>': '4' bytes padding added after data member '<name>'
+  add_compile_options(/wd4820)
+
+  # conversion from '<type1>' to '<type2>', possible loss of data
+  add_compile_options(/wd4242 /wd4244 /wd4267)
+
+  # Disable warning on unsafe string functions
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+
+  if(MSVC_VERSION GREATER_EQUAL 1913)
+    # Disable warnings from system headers
+    add_compile_options(/external:anglebrackets /external:W0)
+  endif()
+endif()
+
 # Targets
 set(c_sources ${CMAKE_CURRENT_SOURCE_DIR}/ftdi.c ${CMAKE_CURRENT_SOURCE_DIR}/ftdi_stream.c CACHE INTERNAL "List of c sources")
 set(c_headers ${CMAKE_CURRENT_SOURCE_DIR}/ftdi.h CACHE INTERNAL "List of c headers")
