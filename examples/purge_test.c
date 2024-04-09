@@ -23,15 +23,13 @@
 #include <getopt.h>
 #include <signal.h>
 #include <errno.h>
-/* Prevent deprecated messages when building library */
-#define _FTDI_DISABLE_DEPRECATED
 #include <ftdi.h>
 
-#include <termios.h>		// For baudcodes & linux UARTs
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <termios.h>		// For baudcodes & linux UARTs
 
 static struct ftdi_context *ftdi = NULL;
 static int dev_fd = -1;
@@ -42,7 +40,6 @@ static int baud = 9600;
 static int baud_code = -1;
 static enum ftdi_interface interface = INTERFACE_A;
 static int msg_size = 80;
-static int broken_purge_test = 0;
 
 static const int latency_min = 2;
 static const int latency_max = 255;
@@ -91,34 +88,33 @@ static const char * chip_types[] = {
 static void
 usage(const char *argv0)
 {
-   fprintf(stderr,
-           "Usage: %s [options...] device-specifier\n"
-           "Flush test for UARTS.\n"
-	   " with loopback connector\n"
-           "    [-b baud]        baud rate (e.g., 300, 600, 1200, ...230400)\n"
-           "    [-i {a|b|c|d}]   FTDI interface for chips which have multiple UARTS\n"
-	   "    [-l latency]     Latency (%d..%d)\n"
-           "    [-n msg-size]    Number of bytes in test message\n"
-           "    [-N note]        Note for the output\n"
-	   "    [-P]             Use broken libftdi1 purge methods (over new flush)\n"
-           "\n"
-           "    device-specifier String specifying the UART.  If the first character\n"
-	   "                     is the '/' character, the program assumes a Linux UART\n"
-	   "                     is to be tested and the string would be something like\n"
-	   "                     '/dev/ttyS0' or '/dev/ttyUSB0'. Otherwise, the program\n"
-	   "                     assumes an FTDI device is being tested with the FTDI1\n"
-	   "                     library. The device-specifier must be a string\n"
-	   "                     accepted by the ftdi_usb_open_string function. An\n"
-	   "                     example would be 'i:0x0403:0x6011[:index]'.\n"
-	   "\n"
-	   "NOTE: To function correctly, this program requires a loopback connector\n"
-	   "      attached to the UART under test.\n"
-           "\n"
-           "Adapted from stream_test.c 2018. Eric Schott <els6@psu.edu>\n"
-           "Copyright (C) 2009 Micah Dowty <micah@navi.cx>\n"
-           "Adapted for use with libftdi (C) 2010 Uwe Bonnes <bon@elektron.ikp.physik.tu-darmstadt.de>\n",
-           argv0, latency_min, latency_max);
-   exit(1);
+    fprintf(stderr,
+        "Usage: %s [options...] device-specifier\n"
+        "Flush test for UARTS.\n"
+        " with loopback connector\n"
+        "    [-b baud]        baud rate (e.g., 300, 600, 1200, ...230400)\n"
+        "    [-i {a|b|c|d}]   FTDI interface for chips which have multiple UARTS\n"
+        "    [-l latency]     Latency (%d..%d)\n"
+        "    [-n msg-size]    Number of bytes in test message\n"
+        "    [-N note]        Note for the output\n"
+        "\n"
+        "    device-specifier String specifying the UART.  If the first character\n"
+        "                     is the '/' character, the program assumes a Linux UART\n"
+        "                     is to be tested and the string would be something like\n"
+        "                     '/dev/ttyS0' or '/dev/ttyUSB0'. Otherwise, the program\n"
+        "                     assumes an FTDI device is being tested with the FTDI1\n"
+        "                     library. The device-specifier must be a string\n"
+        "                     accepted by the ftdi_usb_open_string function. An\n"
+        "                     example would be 'i:0x0403:0x6011[:index]'.\n"
+        "\n"
+        "NOTE: To function correctly, this program requires a loopback connector\n"
+        "      attached to the UART under test.\n"
+        "\n"
+        "Adapted from stream_test.c 2018. Eric Schott <els6@psu.edu>\n"
+        "Copyright (C) 2009 Micah Dowty <micah@navi.cx>\n"
+        "Adapted for use with libftdi (C) 2010 Uwe Bonnes <bon@elektron.ikp.physik.tu-darmstadt.de>\n",
+        argv0, latency_min, latency_max);
+    exit(1);
 }
 
 
@@ -137,7 +133,7 @@ int main(int argc, char **argv)
     long int msg_xmit_time_us;
     static struct option long_options[] = {{NULL},};
 
-    while ((c = getopt_long(argc, argv, "n:b:i:l:N:P", long_options, &option_index)) !=- 1)
+    while ((c = getopt_long(argc, argv, "n:b:i:l:N", long_options, &option_index)) != -1)
         switch (c)
         {
         case -1:
@@ -178,11 +174,11 @@ int main(int argc, char **argv)
             latency = ascii2int(optarg, argv[0]);
             if (latency < latency_min || latency > latency_max)
             {
-	      fprintf(stderr, "latency [-l] must be an integer in the range %d..%d\n",
-			latency_min, latency_max);
+                fprintf(stderr, "latency [-l] must be an integer in the range %d..%d\n",
+                    latency_min, latency_max);
                 usage(argv[0]);
             }
-	    latency_specified = 1;
+            latency_specified = 1;
             break;
         case 'n':
             msg_size = ascii2int(optarg, argv[0]);
@@ -195,9 +191,6 @@ int main(int argc, char **argv)
         case 'N':
             note = optarg;
             break;
-	case 'P':
-	    broken_purge_test = 1;
-	    break;
         default:
             usage(argv[0]);
         }
@@ -227,14 +220,9 @@ int main(int argc, char **argv)
     {
         struct termios termios;
 
-	if (latency_specified) {
-	  fprintf(stderr, "Latency (-l) option not support on this device; ignored\n");
-	}
-
-	if (broken_purge_test) {
-	  fprintf(stderr, "Broken-purge (-P) option not support with Linux kernel driver\n");
-	  return EXIT_FAILURE;
-	}
+        if (latency_specified) {
+            fprintf(stderr, "Latency (-l) option not support on this device; ignored\n");
+        }
 
         dev_fd = open(dev_string, O_NOCTTY | O_RDWR);
         if (dev_fd < 0)
@@ -257,7 +245,7 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
 
-	note_default = "Linux kernel driver";
+        note_default = "Linux kernel driver";
 
         cfmakeraw(&termios);
 
@@ -305,18 +293,18 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
 
-	if(ftdi_set_latency_timer(ftdi, (unsigned char) latency))
-	{
-	    if (latency_specified &&
+        if (ftdi_set_latency_timer(ftdi, (unsigned char) latency))
+        {
+            if (latency_specified &&
                 (ftdi->type == TYPE_AM || ftdi->type == TYPE_232H)) {
-	        fprintf(stderr, "Latency (-l) option not support on this device; ignored\n");
-	    } else if (ftdi->type != TYPE_AM && ftdi->type != TYPE_232H) {
+                fprintf(stderr, "Latency (-l) option not support on this device; ignored\n");
+            } else if (ftdi->type != TYPE_AM && ftdi->type != TYPE_232H) {
                 fprintf(stderr,"Error setting latency for ftdi device \"%s\" (%d): %s\n",
                         dev_string, ftdi->type, ftdi_get_error_string(ftdi));
                 ftdi_free(ftdi);
                 return EXIT_FAILURE;
             }
-	}
+        }
 
         if (ftdi_set_line_property2(ftdi, BITS_8, STOP_BIT_1, NONE, BREAK_OFF) < 0)
         {
@@ -341,11 +329,6 @@ int main(int argc, char **argv)
             ftdi_free(ftdi);
             return EXIT_FAILURE;
         }
-
-	if (broken_purge_test)
-	    note_default = "libftdi w/ deprecated purge";
-	else
-	    note_default = "libftdi w/ new flush methods";
     }
 
     printf("Purge (tcflush) test for device %s\n", dev_string);
@@ -426,7 +409,7 @@ int main(int argc, char **argv)
         int rc;
 
         printf("\n********  Test purge %s; expect %s  ********\n"
-	       "  --              Flushing UART\n",
+           "  --              Flushing UART\n",
                flushTestName[test], expected[test]);
         flush(TCIOFLUSH);
         usleep(msg_xmit_time_us);
@@ -478,7 +461,7 @@ int main(int argc, char **argv)
             usleep(usec_delay);
         }
         else
-	{
+        {
             printf("  -- %9.1f ms Drain() reports completed; timing OK; delaying for 4 bytes\n", 
                    (get_time_usec() - usec_test_start) * .001);
             usleep(char_cnt_2_usec(4));
@@ -539,28 +522,28 @@ static int ascii2int(const char * str, const char * pgm_name)
 /**********************************************************************
  */
 static struct Baud_Table {
-	int32_t baud, baud_code;
+    int32_t baud, baud_code;
 } baud_table [] =
 {
-	{ 50,     B50     },
-	{ 75,     B75     },
-	{ 110,    B110    },
-	{ 134,    B134    },
-	{ 150,    B150    },
-	{ 200,    B200    },
-	{ 300,    B300    },
-	{ 600,    B600    },
-	{ 1200,   B1200   },
-	{ 1800,   B1800   },
-	{ 2400,   B2400   },
-	{ 4800,   B4800   },
-	{ 9600,   B9600   },
-	{ 19200,  B19200  },
-	{ 38400,  B38400  },
-	{ 57600,  B57600  },
-	{ 115200, B115200 },
-	{ 230400, B230400 },
-	{ -1,     -1,     }
+    { 50,     B50     },
+    { 75,     B75     },
+    { 110,    B110    },
+    { 134,    B134    },
+    { 150,    B150    },
+    { 200,    B200    },
+    { 300,    B300    },
+    { 600,    B600    },
+    { 1200,   B1200   },
+    { 1800,   B1800   },
+    { 2400,   B2400   },
+    { 4800,   B4800   },
+    { 9600,   B9600   },
+    { 19200,  B19200  },
+    { 38400,  B38400  },
+    { 57600,  B57600  },
+    { 115200, B115200 },
+    { 230400, B230400 },
+    { -1,     -1,     }
 };
 
 /**********************************************************************
@@ -619,7 +602,7 @@ static int flush(int queue_selector)
     int rc;
     if (dev_fd >= 0)
         rc = tcflush(dev_fd, queue_selector);
-    else if (! broken_purge_test)
+    else
     {
         switch (queue_selector) {
 
@@ -640,28 +623,6 @@ static int flush(int queue_selector)
             return -1;
         }
     }
-    else
-    {
-        switch (queue_selector) {
-
-        case TCIOFLUSH:
-            rc = ftdi_usb_purge_buffers(ftdi);
-            break;
-
-        case TCIFLUSH:
-            rc = ftdi_usb_purge_rx_buffer(ftdi);
-            break;
-
-        case TCOFLUSH:
-            rc = ftdi_usb_purge_tx_buffer(ftdi);
-            break;
-
-        default:
-            errno = EINVAL;
-            return -1;
-        }
-    }
-
     return rc;
 }
 
